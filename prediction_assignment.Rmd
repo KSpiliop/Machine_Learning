@@ -1,0 +1,301 @@
+---
+title: "Multiclass classification with Human Activity Recognition (HAR) data"
+date: "May 24, 2015"
+output:
+  html_document:
+    theme: cerulean
+---
+
+### Introduction
+
+In this study, we are given the data from a Human Activity Recognition (HAR) project. This involves measurements of the activities of 4 healthy subjects for a duration of 8 hours, during exercises. The task carried out by the researchers was a supervised multiple classification one, in particular the prediction of the activity. 
+
+The project's site is at http://groupware.les.inf.puc-rio.br/har
+
+The task is to apply a proper machine algorithm on a training subset of the data, verify its classification accuracy using the out of sample data set, and also produce predictions for 20 new records.  
+
+
+***
+
+
+### Data
+
+The data were downloaded from the links given by the course staff:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv (main data set)
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv (20 new cases)
+
+```{r echo = FALSE  }
+rm( list = ls() )
+
+require( caret )
+#require( ggplot2 )
+#require( C50 )
+
+numMiss <- function( df ) {
+# a function to return information on the missing values
+# in a data frame  
+  nm <- vector( mode = "numeric", length = ncol( df ) )
+  nm.perc <- vector( mode = "numeric", length = ncol( df ) )
+  for( i in ( 1 : ncol( df ) ) ) {
+    var <- names( df )[ i ]
+    nm[ i ] <- sum( as.numeric( is.na( df[ , i ] ) ) )
+    nm.perc[ i ] <- round( nm[ i ] / nrow( df ), 3 )
+  }
+  return( list( vars = names( df ), nm = nm, nm.perc = nm.perc ) )
+}
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+
+
+setwd("~/GitHub/Machine_Learning")
+
+# watch for "#DIV/0!"
+df <- read.table ( file = "pml-training.csv", header = TRUE, 
+      sep = ",", quote = "\"'", stringsAsFactors = FALSE,
+      dec = ".", row.names = NULL, 
+      na.strings = c( "NA", "#DIV/0!" ) )
+
+df[ , 1 ] <- NULL
+
+```
+
+
+The detailed information for the variables was found in the researchers paper [1].
+
+The target variable is named classe and has a balanced distribution. We do not need to perform any balancing pre-processing. The 5 classes (labelled A to E) correspond to sitting-down, standing-up, standing, walking, and sitting:
+
+```{r}
+table( df$classe )
+
+```
+
+***
+### Pre-processing
+
+After reading the data into a data frame df (see Appendix - 1 *"Commands to read the dataset"*), the next step was to delete variables which have too many missing values. Function numMiss() is in Appendix - 2 *"Function to examine percentage of missing values"*. 100 variables were deleted.
+
+```{r}
+# find variables with too many missing values and delete them
+delMis <- numMiss( df )$nm.perc > 0.9
+sum( delMis )
+
+df <- df[ , -which( delMis ) ]
+```
+
+Then, we examined the correlations between the numeric predictors and removed 6 variables using the function findCorrelation() in caret. 
+
+```{r}
+# correlations between numeric predictors
+nums <- sapply( df, is.numeric )
+corMat <- cor( df[ , nums ] )
+
+# remove correlated variables
+delCor <- findCorrelation(corMat, cutoff = .90, verbose = FALSE )
+delCor
+df <- df[ , -delCor ]
+
+```
+
+For reasons of convenience, in the remaining 52 variables, we put two character ones (user_name in position 1 and new_window in position 4) just before the last variable classe which is the target. 
+```{r}
+# re-arrange some columns: two character variables before class
+df <- df[ , c( 2:3, 5:51, 1, 4, 52 )]
+```
+
+Next, we initialized the random number generator to produce a repeatable sequence and partitioned the data into a 60% training set and a 40% testing one. The character variables (including the target) were defined as factors.
+
+
+```{r}
+set.seed( 1234 )
+
+inT <- createDataPartition( df$classe, p = 0.6,
+                           list = FALSE )
+
+training <- df[ inT, ]
+testing <- df[ -inT, ]
+
+rm( df )
+
+training <- within( training, {
+  user_name <- as.factor( user_name  )
+  new_window <- as.factor( new_window  )
+  classe <- as.factor( classe  )
+  }
+)
+
+testing <- within( testing, {
+  user_name <- as.factor( user_name  )
+  new_window <- as.factor( new_window  )
+  classe <- as.factor( classe  )
+  }
+)
+
+```
+Although not strictly necessary (because we had decided to use decision trees after some tests) we proceeded with the common center and scale transformations of the numeric variables, using the preProcess() function in caret. The transformations in the testing set were exactly the ones applied in the training set.
+
+```{r}
+xTrans <- preProcess( training[ , 1:49 ], 
+                      method = c("center", "scale") )
+tmp <- predict( xTrans, training[ , 1:49 ] )
+training <- cbind( tmp, training[ , 50:52 ] )
+
+tmp <- predict( xTrans, testing[ , 1:49 ] )
+testing <- cbind( tmp, testing[ , 50:52 ] )
+
+row.names( training )<- 1:nrow( training )
+row.names( testing )<- 1:nrow( testing )
+```
+***
+### Modeling 
+
+As it turned out, a single C5.0 tree was sufficient to achieve excellent accuracy. The full results are shown in Appendix 3 -  *"C5.0 model - Detailed results"*. Because the number of predictors was still large, we set the algorithm to perform further feature selection with "winnowing". As shown below, the accuracy is 99.9% in the training set and 99.7% in the testing set. With this level of accuracy in the testing set, we did not have to apply cross-validation or boosting in the training set. Besides, the sample size is considered medium. In fact, relevant tests with boosting did not show further improvement.
+
+```{r}
+
+# do not show "some row.names duplicated" warnings
+options( warn = -1 )
+
+model1 <- train( classe  ~., method = "C5.0Tree", data = training, control = C5.0Control( winnow = TRUE ) )
+
+options( warn = 0 )
+
+save( model1, file = "model1.Rdata" )
+
+load( file = "model1.Rdata" )
+
+tab1 <- predict( model1, newdata = training )
+confusionMatrix( tab1, training$classe, 
+                 dnn = c( "Predicted", "Actual" ) )
+
+tab2 <- predict( model1, newdata = testing )
+confusionMatrix( tab2, testing$classe, 
+                 dnn = c( "Predicted", "Actual" ) )
+```
+Pairwise ROC curves are not presented, because these practically show the perfect lines. The variable importance is shown below. The variable roll_belt has an importance of 100% and is the top level splitting variable.
+```{r}
+v <- varImp( model1 )
+v
+dotPlot(  varImp( model1 ), top = 20 )
+
+```
+
+In the following, we create a variable to represent the top two levels of the tree in the model (see Appendix 3 -  *"C5.0 model - Detailed results"*).  
+
+```{r}
+testing <- within( testing, {
+  treeVar <- ifelse( roll_belt > 1.043879 & 
+                       pitch_arm > 1.634051, 'Node 1',
+             ifelse( roll_belt > 1.043879 & 
+                       pitch_arm <= 1.634051, 'Node 2',
+             ifelse( roll_belt <= 1.043879 & 
+                       pitch_forearm > -1.623873, 'Node 3',
+                     'Node 4' )))
+  }
+)           
+
+
+```
+
+These nodes in the testing set are shown in the following bar chart. The differentiation is very clear. The node not shown has only 14 observations.
+
+```{r}
+ggplot( data = testing, aes( x = treeVar, fill =  classe) ) + 
+    geom_bar() + scale_fill_brewer( palette = 1 ) +
+    labs( title = "Top nodes in the tree - testing set", 
+          y = "Count", x = "Node", fill = "Class")
+
+```
+
+***
+
+### Prediction of new cases 
+
+The relevant code is shown below. The comments show the reproduction of the pre-processing steps.
+
+```{r}
+
+# predicting classes of new cases
+
+df.new <- read.table ( file = "pml-testing.csv", header = TRUE, 
+      sep = ",", quote = "\"'", stringsAsFactors = FALSE,
+      dec = ".", row.names = NULL, 
+      na.strings = c( "NA", "#DIV/0!" ) )
+
+df.new[ , 1 ] <- NULL
+
+# leave same predictors in the same order
+common_names <- intersect( names( training ), names( df.new ) )
+df.new <- df.new[ , common_names ]
+
+# center and scale using the transformation in the training set
+tmp <- predict( xTrans, df.new[ , 1:49 ] )
+df.new <- cbind( tmp, df.new[ , 50:51 ] )
+
+tab3 <- predict( model1, newdata = df.new )
+
+pml_write_files( tab3 )
+
+```
+
+### Conclusion:
+
+In this assignment, we experimented with the C5.0 algorithm and  the multiclass classification problem researched in a study involving Human Activity Recognition (HAR). The authors of the relevant paper used the C4.5 algorithm together with AdaBoost and achieved a weighted accuracy of 99.4% with much tuning. 
+
+The approach we tested here resulted to a better result with minimal effort. This confirms the authors conclusion on the power of decision trees in problems in this new area of investigation.
+
+Finally, we used this model to predict the class of 20 new cases.
+
+***
+
+### References
+
+[1] Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements. Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
+
+***
+
+### Appendix
+
+## 1. Commands to read the dataset. 
+
+We labelled some divisions with zero to NAs and also deleted the first unnamed variable which contained a record index. 
+
+```{r eval = FALSE }
+df <- read.table ( file = "pml-training.csv", header = TRUE, 
+      sep = ",", quote = "\"'", stringsAsFactors = FALSE,
+      dec = ".", row.names = NULL, 
+      na.strings = c( "NA", "#DIV/0!" ) )
+
+df[ , 1 ] <- NULL
+```
+
+## 2. Function to examine percentage of missing values.
+
+```{r eval = FALSE }
+numMiss <- function( df ) {
+# a function to return information on the missing values
+# in a data frame  
+  nm <- vector( mode = "numeric", length = ncol( df ) )
+  nm.perc <- vector( mode = "numeric", length = ncol( df ) )
+  for( i in ( 1 : ncol( df ) ) ) {
+    var <- names( df )[ i ]
+    nm[ i ] <- sum( as.numeric( is.na( df[ , i ] ) ) )
+    nm.perc[ i ] <- round( nm[ i ] / nrow( df ), 3 )
+  }
+  return( list( vars = names( df ), nm = nm, nm.perc = nm.perc ) )
+}
+```
+
+## 3. C5.0 model - Detailed results.
+```{r}
+
+summary( model1$finalModel )
+```
