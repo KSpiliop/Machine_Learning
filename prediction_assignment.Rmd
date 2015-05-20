@@ -157,14 +157,21 @@ row.names( testing )<- 1:nrow( testing )
 ***
 ### Modeling 
 
-As it turned out, a single C5.0 tree was sufficient to achieve excellent accuracy. The full results are shown in Appendix 3 -  *"C5.0 model - Detailed results"*. Because the number of predictors was still large, we set the algorithm to perform further feature selection with "winnowing". As shown below, the accuracy is 99.9% in the training set and 99.7% in the testing set. With this level of accuracy in the testing set, we did not have to apply cross-validation or boosting in the training set. Besides, the sample size is considered medium. In fact, relevant tests with boosting did not show further improvement.
+As it turned out, a single C5.0 tree was sufficient to achieve excellent accuracy. The full results are shown in Appendix 3 -  *"C5.0 model - Detailed results"*. Because the number of predictors was still large, we set the algorithm to perform further feature selection with "winnowing". To estimate the out of sample error, we also applied 25 bootstrap operations. As shown below, the accuracy is 99.9% in the training set and 99.7% in the testing set. 
 
 ```{r}
+
+## 25 bootstrap iterations
+fitControl <- trainControl( method = "boot632",
+                            number = 25 )
 
 # do not show "some row.names duplicated" warnings
 options( warn = -1 )
 
-model1 <- train( classe  ~., method = "C5.0Tree", data = training, control = C5.0Control( winnow = TRUE ) )
+model1 <- train( classe  ~., method = "C5.0Tree", 
+                 data = training, 
+                 trControl = fitControl,
+                 control = C5.0Control( winnow = TRUE ) )
 
 options( warn = 0 )
 
@@ -180,6 +187,14 @@ tab2 <- predict( model1, newdata = testing )
 confusionMatrix( tab2, testing$classe, 
                  dnn = c( "Predicted", "Actual" ) )
 ```
+***
+
+### Out of sample error estimation and other results
+
+As shown in previous sections, in order to obtain a reliable estimate of the out of sample error, we first performed a simple split (by partitioning the data set) and then applied bootstrap on the training set. That is, the testing set after the partitioning is actually a validation data set. 
+
+The 95% confidence interval for the accuracy is (0.9961, 0.9984). We expected this high out of sample accuracy. In initial tests without bootstrapping the results on the testing set were the same.  
+
 Pairwise ROC curves are not presented, because these practically show the perfect lines. The variable importance is shown below. The variable roll_belt has an importance of 100% and is the top level splitting variable.
 ```{r}
 v <- varImp( model1 )
@@ -219,7 +234,7 @@ ggplot( data = testing, aes( x = treeVar, fill =  classe) ) +
 
 ### Prediction of new cases 
 
-The relevant code is shown below. The comments show the reproduction of the pre-processing steps.
+The relevant code is shown below. The comments show the reproduction of the pre-processing steps. All cases were predicted correctly.
 
 ```{r}
 
@@ -252,7 +267,7 @@ In this assignment, we experimented with the C5.0 algorithm and  the multiclass 
 
 The approach we tested here resulted to a better result with minimal effort. This confirms the authors conclusion on the power of decision trees in problems in this new area of investigation.
 
-Finally, we used this model to predict the class of 20 new cases.
+Finally, we used this model to predict the class of 20 new cases. The accuracy was 100% in these cases.
 
 ***
 
@@ -264,7 +279,7 @@ Finally, we used this model to predict the class of 20 new cases.
 
 ### Appendix
 
-## 1. Commands to read the dataset. 
+#### 1. Commands to read the dataset. 
 
 We labelled some divisions with zero to NAs and also deleted the first unnamed variable which contained a record index. 
 
@@ -277,7 +292,7 @@ df <- read.table ( file = "pml-training.csv", header = TRUE,
 df[ , 1 ] <- NULL
 ```
 
-## 2. Function to examine percentage of missing values.
+#### 2. Function to examine percentage of missing values.
 
 ```{r eval = FALSE }
 numMiss <- function( df ) {
@@ -294,7 +309,7 @@ numMiss <- function( df ) {
 }
 ```
 
-## 3. C5.0 model - Detailed results.
+#### 3. C5.0 model - Detailed results.
 ```{r}
 
 summary( model1$finalModel )

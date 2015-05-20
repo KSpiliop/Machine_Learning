@@ -92,15 +92,20 @@ testing <- cbind( tmp, testing[ , 50:52 ] )
 row.names( training )<- 1:nrow( training )
 row.names( testing )<- 1:nrow( testing )
 
+## 25 bootstrap iterations
+fitControl <- trainControl( method = "boot632",
+                            number = 25 )
+
 options( warn = -1 )
 
-model1 <- train( classe  ~., method = "C5.0Tree", data = training, 
-control = C5.0Control( winnow = TRUE ) )
+model1 <- train( classe  ~., method = "C5.0Tree", 
+                 data = training, 
+                 trControl = fitControl,
+                 control = C5.0Control( winnow = TRUE ) )
 
 options( warn = 0 )
 
-#model1 <- train( classe  ~., method = "C5.0Tree", data = training, 
-#trControl = trainControl( method = "boot632", number = 10 ) )
+model1
 
 save( model1, file = "model1.Rdata" )
 load( file = "model1.Rdata" )
